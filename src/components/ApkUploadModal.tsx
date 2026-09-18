@@ -20,23 +20,18 @@ export function ApkUploadModal({ isOpen, onClose }: ApkUploadModalProps) {
   if (!isOpen) return null;
 
   const handleFile = async (file: File) => {
-    if (!file.name.toLowerCase().endsWith('.apk') && !file.name.toLowerCase().endsWith('.zip')) {
-      showToast('Please select a valid .apk file');
-      return;
-    }
-
     setIsProcessing(true);
     try {
       setStatusStep('Reading APK archive package...');
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 150));
 
       setStatusStep('Parsing AndroidManifest.xml & AXML binary schema...');
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 200));
 
       const parsed = await parseApkFile(file);
 
       setStatusStep('Opening Android 10 Package Installer...');
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, 150));
 
       sideloadApkPrompt(parsed);
       showToast(`Staged ${parsed.manifest.appName} for sideloading`);
