@@ -117,7 +117,6 @@ export function ApkUploadModal({ isOpen, onClose }: ApkUploadModalProps) {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".apk,.zip"
             onChange={(e) => {
               if (e.target.files && e.target.files.length > 0) {
                 handleFile(e.target.files[0]);

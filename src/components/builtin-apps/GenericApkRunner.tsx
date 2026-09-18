@@ -21,6 +21,38 @@ export function GenericApkRunner({ apk }: GenericApkRunnerProps) {
   const webViewSrcDoc = useMemo(() => {
     if (!apk.hasWebAssets || !apk.entryHtmlContent) return null;
 
+    let html = apk.entryHtmlContent;
+
+    // Inject bundled assets by replacing script and link tags
+    if (apk.bundledAssets) {
+      Object.entries(apk.bundledAssets).forEach(([assetPath, content]) => {
+        const fileName = assetPath.split('/').pop();
+        if (!fileName) return;
+
+        // Inline JavaScript
+        if (fileName.endsWith('.js')) {
+          const scriptRegex = new RegExp(`<script[^>]*src=["'].*?${fileName}["'][^>]*>\\s*</script>`, 'gi');
+          if (scriptRegex.test(html)) {
+            html = html.replace(scriptRegex, `<script>${content}</script>`);
+          } else {
+             // If not matched by exact name, maybe just append it if we must, but usually better to replace.
+          }
+        }
+        // Inline CSS
+        else if (fileName.endsWith('.css')) {
+          const linkRegex = new RegExp(`<link[^>]*href=["'].*?${fileName}["'][^>]*>`, 'gi');
+          if (linkRegex.test(html)) {
+            html = html.replace(linkRegex, `<style>${content}</style>`);
+          }
+        }
+        // Replace Image URLs with blob URLs
+        else {
+          const imgRegex = new RegExp(`src=["'].*?${fileName}["']`, 'gi');
+          html = html.replace(imgRegex, `src="${content}"`);
+        }
+      });
+    }
+
     // Inject Android Bridge script
     const bridgeScript = `
       <script>
@@ -38,7 +70,7 @@ export function GenericApkRunner({ apk }: GenericApkRunnerProps) {
       </script>
     `;
 
-    return apk.entryHtmlContent.replace('<head>', `<head>${bridgeScript}`);
+    return html.replace('<head>', `<head>${bridgeScript}`);
   }, [apk, batteryLevel]);
 
   // Listen for messages from WebView iframe
@@ -136,125 +168,36 @@ export function GenericApkRunner({ apk }: GenericApkRunnerProps) {
 
           <div className="flex-1 overflow-y-auto p-3">
             {activeTab === 'ui' && (
-              <div className="flex flex-col gap-3">
-                {/* Simulated Android Activity Screen */}
-                <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700/70 flex flex-col gap-3">
-                  <div className="flex items-center justify-between pb-2 border-b border-slate-700">
-                    <span className="text-[11px] font-mono text-emerald-400">
-                      {apk.manifest.launcherActivity || '.MainActivity'}
-                    </span>
-                    <span className="text-[10px] text-slate-400">Android View Hierarchy</span>
+              <div className="flex flex-col gap-3 h-full items-center justify-center p-4 text-center">
+                <div className="w-16 h-16 bg-slate-800 rounded-2xl border border-slate-700 flex items-center justify-center mb-2">
+                  <ShieldCheck size={28} className="text-emerald-400" />
+                </div>
+                <h2 className="text-sm font-bold text-slate-100">Native Execution Not Supported</h2>
+                <p className="text-xs text-slate-400 max-w-[240px] leading-relaxed">
+                  This APK contains compiled ARM/x86 native code and Dalvik bytecode. Web browsers cannot execute native Android binaries directly.
+                </p>
+                <div className="bg-slate-900/90 p-4 rounded-xl border border-slate-800 mt-2 text-left w-full">
+                  <span className="text-[10px] text-slate-500 uppercase font-semibold block mb-2">APK Details</span>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <span className="text-xs text-slate-400">Package</span>
+                    <span className="text-xs font-mono text-emerald-400 truncate max-w-[120px]">{apk.manifest.packageName}</span>
                   </div>
-
-                  {/* Interactive Dalvik Widgets */}
-                  <div className="flex flex-col gap-2.5">
-                    <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800">
-                      <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">
-                        android.widget.TextView (Title)
-                      </label>
-                      <h4 className="font-bold text-sm text-slate-100">{apk.manifest.appName}</h4>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        Running inside Web Dalvik Emulation Engine • v{apk.manifest.versionName}
-                      </p>
-                    </div>
-
-                    {/* Interactive Counter Widget */}
-                    <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
-                      <div>
-                        <span className="text-[10px] text-slate-400 block font-semibold">STATE VARIABLE</span>
-                        <span className="text-xl font-bold font-mono text-emerald-400">{counter}</span>
-                      </div>
-                      <div className="flex gap-1.5">
-                        <button
-                          onClick={() => {
-                            setCounter((c) => c - 1);
-                            vibrateDevice(10);
-                            addLog('D', 'MainActivity', `Counter updated: ${counter - 1}`);
-                          }}
-                          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold"
-                        >
-                          -
-                        </button>
-                        <button
-                          onClick={() => {
-                            setCounter((c) => c + 1);
-                            vibrateDevice(10);
-                            addLog('D', 'MainActivity', `Counter updated: ${counter + 1}`);
-                          }}
-                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold"
-                        >
-                          +
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Interactive Toast Dispatcher */}
-                    <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800 flex flex-col gap-2">
-                      <label className="text-[10px] text-slate-400 uppercase font-semibold">
-                        android.widget.Toast Dispatcher
-                      </label>
-                      <div className="flex gap-1.5">
-                        <input
-                          type="text"
-                          value={toastMessage}
-                          onChange={(e) => setToastMessage(e.target.value)}
-                          className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
-                        />
-                        <button
-                          onClick={() => {
-                            showToast(toastMessage);
-                            vibrateDevice(20);
-                            addLog('I', 'Toast', `Toast.makeText("${toastMessage}", LENGTH_SHORT).show()`);
-                          }}
-                          className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1"
-                        >
-                          <Send size={12} />
-                          <span>Show</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Lifecycle Control Buttons */}
-                    <div className="grid grid-cols-3 gap-1.5 pt-1">
-                      <button
-                        onClick={() => {
-                          setLifecycleState('RESUMED');
-                          vibrateDevice(15);
-                          addLog('I', 'ActivityLifecycle', 'Activity.onResume() executed');
-                        }}
-                        className={`py-1.5 rounded-lg text-[10px] font-bold transition ${
-                          lifecycleState === 'RESUMED' ? 'bg-emerald-700 text-white' : 'bg-slate-800 text-slate-300'
-                        }`}
-                      >
-                        onResume()
-                      </button>
-                      <button
-                        onClick={() => {
-                          setLifecycleState('PAUSED');
-                          vibrateDevice(15);
-                          addLog('I', 'ActivityLifecycle', 'Activity.onPause() executed');
-                        }}
-                        className={`py-1.5 rounded-lg text-[10px] font-bold transition ${
-                          lifecycleState === 'PAUSED' ? 'bg-amber-700 text-white' : 'bg-slate-800 text-slate-300'
-                        }`}
-                      >
-                        onPause()
-                      </button>
-                      <button
-                        onClick={() => {
-                          setLifecycleState('STOPPED');
-                          vibrateDevice(20);
-                          addLog('I', 'ActivityLifecycle', 'Activity.onStop() executed');
-                        }}
-                        className={`py-1.5 rounded-lg text-[10px] font-bold transition ${
-                          lifecycleState === 'STOPPED' ? 'bg-rose-700 text-white' : 'bg-slate-800 text-slate-300'
-                        }`}
-                      >
-                        onStop()
-                      </button>
-                    </div>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <span className="text-xs text-slate-400">Version</span>
+                    <span className="text-xs font-mono text-slate-300">{apk.manifest.versionName}</span>
+                  </div>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <span className="text-xs text-slate-400">Target SDK</span>
+                    <span className="text-xs font-mono text-slate-300">API {apk.manifest.targetSdkVersion}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-slate-400">Type</span>
+                    <span className="text-xs font-mono text-slate-300">Native Android App</span>
                   </div>
                 </div>
+                <p className="text-[10px] text-slate-500 mt-2">
+                  Please use the Dalvik VM and Permissions tabs to inspect the app's contents statically. Only web-based (Capacitor/Cordova) APKs can run inside this simulator.
+                </p>
               </div>
             )}
 

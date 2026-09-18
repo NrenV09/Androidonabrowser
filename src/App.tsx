@@ -120,7 +120,6 @@ function EmulatorScreen() {
         type="file"
         ref={fileInputRef}
         onChange={handleFileInputChange}
-        accept=".apk,.xapk,.zip,*"
         className="hidden"
       />
 
