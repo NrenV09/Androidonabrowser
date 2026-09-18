@@ -1,18 +1,395 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Android 10 APK Runner</title>
-    <meta name="description" content="Browser-based Android 10 (API 29) virtual device with local APK sideloading, package installer, Dalvik/ART engine, and ADB console." />
-    <meta property="og:title" content="Android 10 APK Runner" />
-    <meta property="og:description" content="Browser-based Android 10 (API 29) virtual device with local APK sideloading, package installer, Dalvik/ART engine, and ADB console." />
-    <meta property="og:type" content="website" />
-    <meta name="twitter:card" content="summary_large_image" />
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebAssembly Linux Environment</title>
+    
+    <!-- Include v86 from jsDelivr/unpkg -->
+    <script src="https://unpkg.com/v86@0.3.0/build/libv86.js"></script>
+    
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --bg-panel: #1e293b;
+            --border: #334155;
+            --text: #f8fafc;
+            --accent: #3b82f6;
+            --vm-text: #10b981;
+        }
 
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Left Panel - Emulator */
+        #left-pane {
+            flex: 1;
+            background: #000;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+
+        #screen_container {
+            position: relative;
+            background: #000;
+            border-radius: 4px;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            /* Give it a fixed minimum size to prevent layout shifts */
+            min-width: 640px;
+            min-height: 400px;
+        }
+
+        #screen_container > div {
+            white-space: pre;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 14px;
+            line-height: 14px;
+            color: #ccc;
+        }
+
+        #screen_container > canvas {
+            display: none;
+        }
+
+        .overlay-badge {
+            position: absolute;
+            top: 1rem;
+            left: 1rem;
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid var(--border);
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            color: #94a3b8;
+            pointer-events: none;
+            backdrop-filter: blur(4px);
+        }
+
+        /* Right Panel - Controller */
+        #right-pane {
+            width: 450px;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-dark);
+            border-left: 1px solid var(--border);
+            z-index: 10;
+        }
+
+        #chat-header {
+            padding: 1rem;
+            background: var(--bg-panel);
+            border-bottom: 1px solid var(--border);
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .status-dot {
+            height: 8px;
+            width: 8px;
+            background: #f59e0b;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+        .status-dot.ready { background: #10b981; }
+
+        #chat-history {
+            flex: 1;
+            padding: 1.5rem;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            background: #0b0f19;
+            font-family: "JetBrains Mono", "Courier New", monospace;
+            font-size: 13px;
+            scroll-behavior: smooth;
+        }
+
+        .msg {
+            max-width: 90%;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            word-break: break-all;
+            line-height: 1.4;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .msg.user {
+            align-self: flex-end;
+            background: var(--accent);
+            color: white;
+            border-bottom-right-radius: 2px;
+        }
+
+        .msg.vm {
+            align-self: flex-start;
+            background: var(--bg-panel);
+            color: var(--vm-text);
+            border-bottom-left-radius: 2px;
+            white-space: pre-wrap;
+            border: 1px solid var(--border);
+        }
+
+        #chat-input-area {
+            padding: 1rem;
+            background: var(--bg-panel);
+            border-top: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        #cmd-input {
+            width: 100%;
+            padding: 0.875rem 1rem;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--bg-dark);
+            color: var(--text);
+            font-family: monospace;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        #cmd-input:focus {
+            border-color: var(--accent);
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.5rem;
+        }
+
+        button {
+            padding: 0.6rem;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        button:hover { opacity: 0.9; }
+        
+        .btn-alpine { background: #059669; color: white; }
+        .btn-fast { background: #475569; color: white; }
+        .btn-local { grid-column: span 2; background: #3b82f6; color: white; }
+
+        @media (max-width: 800px) {
+            body { flex-direction: column; }
+            #left-pane { height: 50vh; flex: none; }
+            #screen_container { min-width: 100%; min-height: 100%; }
+            #right-pane { width: 100%; flex: 1; border-left: none; border-top: 1px solid var(--border); }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="left-pane">
+        <div class="overlay-badge">v86 WEBASSEMBLY ENGINE</div>
+        <div id="screen_container">
+            <div></div>
+            <canvas></canvas>
+        </div>
+    </div>
+
+    <div id="right-pane">
+        <div id="chat-header">
+            <div>Terminal Controller</div>
+            <div style="font-size: 12px; color: #94a3b8;">
+                <span id="status-indicator" class="status-dot"></span>
+                <span id="status-text">Booting...</span>
+            </div>
+        </div>
+        
+        <div id="chat-history">
+            <div class="msg vm" style="color: #94a3b8">Welcome. Awaiting OS boot...</div>
+        </div>
+
+        <div id="chat-input-area">
+            <input type="text" id="cmd-input" placeholder="Inject command (e.g. ls -la) & press Enter..." autocomplete="off" />
+            
+            <div class="controls">
+                <button class="btn-fast" onclick="bootLinux('buildroot')">Boot Fast Linux</button>
+                <button class="btn-alpine" onclick="bootLinux('alpine')">Boot Alpine ISO (Web)</button>
+                <button class="btn-local" onclick="document.getElementById('iso-upload').click()">📂 Load Custom ISO from Device</button>
+                <input type="file" id="iso-upload" accept=".iso" style="display: none" />
+            </div>
+            <div style="font-size: 11px; color: #64748b; text-align: center; line-height: 1.4;">
+                To run locally on iPad without CORS issues, use the <b>Load Custom ISO</b> button.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let emulator = null;
+        const chatHistory = document.getElementById('chat-history');
+        const cmdInput = document.getElementById('cmd-input');
+        const statusIndicator = document.getElementById('status-indicator');
+        const statusText = document.getElementById('status-text');
+        const isoUpload = document.getElementById('iso-upload');
+
+        // Chat Interface State
+        let currentVmBubble = null;
+        let currentVmText = "";
+        let vmOutputTimeout = null;
+
+        function appendUserMessage(text) {
+            const div = document.createElement('div');
+            div.className = 'msg user';
+            div.textContent = text;
+            chatHistory.appendChild(div);
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+            
+            // Force a new VM bubble after user speaks
+            currentVmBubble = null; 
+        }
+
+        function handleSerialOutput(char) {
+            if (!currentVmBubble) {
+                currentVmBubble = document.createElement('div');
+                currentVmBubble.className = 'msg vm';
+                chatHistory.appendChild(currentVmBubble);
+                currentVmText = "";
+            }
+            
+            // Handle backspace properly for display
+            if (char === '\x08' || char === '\x7f') {
+                currentVmText = currentVmText.slice(0, -1);
+            } else {
+                currentVmText += char;
+            }
+            
+            // Strip ANSI escape codes
+            const cleanText = currentVmText.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+            currentVmBubble.textContent = cleanText;
+            
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+
+            // Debounce bubble splitting: if VM is quiet for 400ms, start a new bubble next time
+            clearTimeout(vmOutputTimeout);
+            vmOutputTimeout = setTimeout(() => {
+                currentVmBubble = null;
+            }, 400);
+        }
+
+        function setStatus(text, ready = false) {
+            statusText.textContent = text;
+            if (ready) {
+                statusIndicator.classList.add('ready');
+            } else {
+                statusIndicator.classList.remove('ready');
+            }
+        }
+
+        function bootLinux(type, fileBuffer = null) {
+            if (emulator) {
+                emulator.destroy();
+            }
+
+            setStatus('Initializing VM...', false);
+            chatHistory.innerHTML = ''; // Clear chat
+            currentVmBubble = null;
+
+            // Base Configuration
+            const config = {
+                wasm_path: "https://unpkg.com/v86@0.3.0/build/v86.wasm",
+                memory_size: 512 * 1024 * 1024,
+                vga_memory_size: 8 * 1024 * 1024,
+                screen_container: document.getElementById("screen_container"),
+                bios: { url: "https://unpkg.com/v86@0.3.0/bios/seabios.bin" },
+                vga_bios: { url: "https://unpkg.com/v86@0.3.0/bios/vgabios.bin" },
+                autostart: true,
+            };
+
+            // Configure boot media
+            if (fileBuffer) {
+                config.cdrom = { buffer: fileBuffer };
+                config.cmdline = "console=ttyS0";
+                appendUserMessage('Loading custom ISO from local device...');
+            } else if (type === 'alpine') {
+                // Public Alpine ISO link
+                config.cdrom = { url: "https://dl-cdn.alpinelinux.org/alpine/v3.18/releases/x86/alpine-virt-3.18.4-x86.iso" };
+                config.cmdline = "console=ttyS0";
+                appendUserMessage('Booting Alpine Linux (Web ISO)... Note: May fail if blocked by CORS on web hosted environments.');
+            } else {
+                // Default: Buildroot (Lightning fast, CORS friendly)
+                config.bzimage = { url: "https://copy.sh/v86/images/buildroot-bzimage.bin" };
+                config.initrd = { url: "https://copy.sh/v86/images/buildroot-initrd.bin" };
+                config.cmdline = "rw root=rootfs console=ttyS0 quiet";
+                appendUserMessage('Booting Fast Buildroot Linux...');
+            }
+
+            // Start Emulator
+            try {
+                emulator = new V86Starter(config);
+                
+                // Bind Serial output to Chat Interface
+                emulator.add_listener("serial0-output-char", handleSerialOutput);
+                
+                emulator.add_listener("emulator-ready", () => {
+                    setStatus('Running', true);
+                });
+            } catch (err) {
+                appendUserMessage('Error initializing VM: ' + err.message);
+            }
+        }
+
+        // Handle Command Injection
+        cmdInput.addEventListener('keydown', function(e) {
+            if (e.key === "Enter") {
+                const cmd = cmdInput.value;
+                if (!cmd) return;
+                
+                appendUserMessage(cmd);
+                cmdInput.value = "";
+                
+                if (emulator) {
+                    // Send to VM via serial port
+                    emulator.serial0_send(cmd + "\n");
+                } else {
+                    const errorBubble = document.createElement('div');
+                    errorBubble.className = 'msg vm';
+                    errorBubble.textContent = 'Error: VM is not running.';
+                    chatHistory.appendChild(errorBubble);
+                }
+            }
+        });
+
+        // Handle Local File Upload
+        isoUpload.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                bootLinux('local', file);
+            }
+            e.target.value = ''; // reset
+        });
+
+        // Auto-boot Fast Linux on initial load
+        window.onload = () => {
+            bootLinux('buildroot');
+        };
+
+    </script>
+</body>
+</html>

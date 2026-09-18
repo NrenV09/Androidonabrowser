@@ -1,6 +1,6 @@
 {
-  "name": "Android 10 APK Runner",
-  "description": "Browser-based Android 10 (API 29) virtual device with local APK sideloading, package installer, Dalvik/ART engine, and ADB console.",
+  "name": "LINUX",
+  "description": "",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
